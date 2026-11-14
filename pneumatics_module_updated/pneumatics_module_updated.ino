@@ -1,6 +1,6 @@
 #include "Arduino.h"
 #include <SPI.h>
-#include <mcp_can.h>
+#include <mcp_can.h>//https://github.com/coryjfowler/MCP_CAN_lib version 1.5.1
 #include <EEPROM.h>
 
 #define COMP 10
@@ -28,6 +28,10 @@
 #define MID_LOWER_RIGHT_BLD 19
 #define LOWERMOST_LEFT_BLD 21
 #define LOWERMOST_RIGHT_BLD 24
+const uint16_t MASSAGE_DELAY = 2200;   
+const uint8_t MASSAGE_LOW_INTENSITY = 102;//40% PWM
+const uint8_t MASSAGE_MED_INTENSITY = 191;//75% PWM
+const uint8_t MASSAGE_HIGH_INTENSITY = 255;//100% PWM
 //////~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 //////~~~~~~~~~~~~~~~~~~~~~~~~~~~DEFINES FOR BOLSTERS~~~~~~~~~~~~~~~~~
@@ -115,6 +119,7 @@ void lumbarAdjustfunction();
 void massagefunction();
 void massagebladderpinsetfunction();
 void bolsterfunction();
+void ReceivingBusMessagesAndDoingStateAssignments();
 void setup() {
   
   for (int i = 0; i <22; i++){//increment through all of the pins (except the analog input and CAN receive interrupt pin) to set them as outputs
@@ -147,6 +152,51 @@ void loop() {
 
   observedpressure = analogRead(PRES); //do the pressure read first (will be useful for the other functions and stuff)
 
+  ReceivingBusMessagesAndDoingStateAssignments();//Receive CANbus and assign operate states or seat interface module
+    //button press states based on received messages
+    ////~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~PNEUMATICS FUNCTIONS AND PIN ASSIGNMENTS WHEN NOT IN USE~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  if(massage.on){
+    massagefunction();
+  }
+  else{ //if massage is off, set all massage pins low. this is so that whatever was on from the last massage state is set back to 0
+    for(int i= 0; i < 10; i++ ){
+      digitalWrite(massage.bladderpins[i],LOW);
+    }
+    massage.firststate = 1; //if massage is off, the next time it turns on will be starting at the first state
+  }
+  if(lumbar.on){//if a new CAN message for lumbar is received, lumbar.on will be set to 1. otherwise, it is 0
+  lumbarAdjustfunction();
+  }
+  else{
+    lumbar.pressuresavetimerenable = 0;//reset both of these lumbar related timer enables in case they were set when lumbar was suddenly switched off
+    bladderchange.exittimerenable = 0;
+    for(int i = 0; i < 6; i++){
+      digitalWrite(lumbar.pins[i], LOW);
+    }
+  }
+  if(bolster.on){
+   bolsterfunction();
+  }
+  else{
+    for(int i = 0; i < 4; i++){
+      digitalWrite(bolster.pins[i], LOW);
+    } 
+  }
+  if(!massage.on && !lumbar.on && !bolster.on){//if none are on, make sure that these two are written low
+    digitalWrite(COMP, LOW);
+  }
+  if(!massage.on && !bolster.on){//lumbar has no provisions to switch the normal vent, so make it only dependent on massage and bolster
+    digitalWrite(VENT, LOW);
+  }
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~END OF PNEUMATICS FUNCTIONS AND PIN ASSIGNMENTS WHEN NOT IN USE~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  if(observedpressure > 950){// I am worried about the possibility of the compressor getting stuck on. this addresses that. note that vent low must be written by something else
+    digitalWrite(VENT, HIGH);
+  }
+
+}
+
+void ReceivingBusMessagesAndDoingStateAssignments(){//this function encompasses the process of receiving CANbus messages from the lower seat interface
+  //module and assigning function states based on this
   //////////////////////////////////////////////////////CHECKING FOR AND READING CANBUS MESSAGES//////////////////////////////////////////////////////
   if(!digitalRead(CAN0_INT)){// If CAN0_INT pin is low, read receive buffer
     CAN0.readMsgBuf(&rxId, &len, rxBuf);// Read data: len = data length, buf = data byte(s)
@@ -231,48 +281,7 @@ void loop() {
     bolster.on = 0;
   }
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  ////~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~PNEUMATICS FUNCTIONS AND PIN ASSIGNMENTS WHEN NOT IN USE~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  if(massage.on){
-    massagefunction();
-  }
-  else{ //if massage is off, set all massage pins low. this is so that whatever was on from the last massage state is set back to 0
-    for(int i= 0; i < 10; i++ ){
-      digitalWrite(massage.bladderpins[i],LOW);
-    }
-    massage.firststate = 1; //if massage is off, the next time it turns on will be starting at the first state
-  }
-  if(lumbar.on){//if a new CAN message for lumbar is received, lumbar.on will be set to 1. otherwise, it is 0
-  lumbarAdjustfunction();
-  }
-  else{
-    lumbar.pressuresavetimerenable = 0;//reset both of these lumbar related timer enables in case they were set when lumbar was suddenly switched off
-    bladderchange.exittimerenable = 0;
-    for(int i = 0; i < 6; i++){
-      digitalWrite(lumbar.pins[i], LOW);
-    }
-  }
-  if(bolster.on){
-   bolsterfunction();
-  }
-  else{
-    for(int i = 0; i < 4; i++){
-      digitalWrite(bolster.pins[i], LOW);
-    } 
-  }
-  if(!massage.on && !lumbar.on && !bolster.on){//if none are on, make sure that these two are written low
-    digitalWrite(COMP, LOW);
-  }
-  if(!massage.on && !bolster.on){//lumbar has no provisions to switch the normal vent, so make it only dependent on massage and bolster
-    digitalWrite(VENT, LOW);
-  }
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~END OF PNEUMATICS FUNCTIONS AND PIN ASSIGNMENTS WHEN NOT IN USE~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  if(observedpressure > 950){// I am worried about the possibility of the compressor getting stuck on. this addresses that. note that vent low must be written by something else
-    digitalWrite(VENT, HIGH);
-  }
-
 }
-
 
 void lumbarAdjustfunction(){
   switch(lumbar.desiredposition){//firstly, set the correct bladders to be vented using their specific vent and the correct one to be switched on based on the desired position
@@ -523,7 +532,8 @@ void massagefunction(){
   ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~END OF CODE FOR SETTING PINS BASED ON MASSAGE MODE AND STATE~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   ///////////////////////////////////////////////STATEMENTS TO CHANGE THE MASSAGE STATE DEPENDING ON THE MODE AND THE ELAPSED TIME IN THE CURRENT STATE///////////////////
-  if(millis()-massage.statestarttime > ((unsigned long)massage.intensity*700 + 1100)){ //if the time has elapsed to change state, advance the state
+  if(millis()-massage.statestarttime > MASSAGE_DELAY){ //if the time has elapsed to change state, advance the state
+    //the argument above was formerly "millis()-massage.statestarttime > ((unsigned long)massage.intensity*700 + 1100"
     massage.state++;
     massage.statestarttime = millis();//set the current time as the new state start time
   }
@@ -542,8 +552,25 @@ void massagefunction(){
   }
   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  digitalWrite(COMP, HIGH); //turning comp on all the time when massage is on;
-
+  /////////////////////////////////////////////////CODE FOR ADJUSTING THE PWM INTENSITY FOR THE DIFFERENT MASSAGE INTENSITIES///////////////////////////////
+  //digitalWrite(COMP, HIGH); //turning comp on all the time when massage is on; NOTE:THIS IS FROM OLD CODE
+  
+  switch(massage.intensity){
+    case 1:{
+      analogWrite(COMP, MASSAGE_LOW_INTENSITY);
+    }
+    break;
+    case 2:{
+      analogWrite(COMP, MASSAGE_MED_INTENSITY);
+    }
+    break;
+    case 3:{
+      analogWrite(COMP, MASSAGE_HIGH_INTENSITY);
+    }
+    break;
+  }
+  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  
   if(observedpressure<600){//turn the vent on if pressure goes above 800 and close it again if pressure drops below 600
     digitalWrite(VENT, LOW);//these two VENT pin writes are to prevent pressure from rising too high during the massage function
   }
