@@ -29,8 +29,8 @@
 #define LOWERMOST_LEFT_BLD 21
 #define LOWERMOST_RIGHT_BLD 24
 const uint16_t MASSAGE_DELAY = 2200;   
-const uint8_t MASSAGE_LOW_INTENSITY = 102;//40% PWM
-const uint8_t MASSAGE_MED_INTENSITY = 191;//75% PWM
+const uint8_t MASSAGE_LOW_INTENSITY = 70;//27% PWM, trying to create 3 fully "defined" states based on motor operation
+const uint8_t MASSAGE_MED_INTENSITY = 200;//75% PWM
 const uint8_t MASSAGE_HIGH_INTENSITY = 255;//100% PWM
 //////~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
