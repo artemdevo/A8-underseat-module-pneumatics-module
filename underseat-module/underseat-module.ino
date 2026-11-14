@@ -1,8 +1,8 @@
 #include "Arduino.h"
-#include "DFRobotDFPlayerMini.h"
+#include "DFRobotDFPlayerMini.h" //https://github.com/DFRobot/DFRobotDFPlayerMini Version 1.0.6
 #include <SoftwareSerial.h>
 #include <SPI.h>
-#include <mcp_can.h>
+#include <mcp_can.h>//https://github.com/coryjfowler/MCP_CAN_lib version 1.5.1
 #include <EEPROM.h>
 
 #define BTN A0
